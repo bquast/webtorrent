@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>vanilla web torrent loader</title>
+  <link rel="stylesheet" href="/style.css" />
+  <!-- webtorrent for browsers (webrtc only) -->
+  <script src="https://cdn.jsdelivr.net/npm/webtorrent@1.9.7/webtorrent.min.js" defer></script>
+  <script src="/script.js" defer></script>
+</head>
+<body>
+  <header class="wrap">
+    <h1>vanilla web torrent loader</h1>
+    <p class="sub">runs in your browser. no server processing. use only with content you have the right to access.</p>
+  </header>
+
+  <main class="wrap">
+    <section class="card">
+      <h2>add a torrent</h2>
+
+      <form id="magnet-form" class="row">
+        <input id="magnet-input" type="text" inputmode="url" placeholder="paste magnet link here"
+               autocomplete="off" spellcheck="false" />
+        <button type="submit">load magnet</button>
+      </form>
+
+      <div class="or">or</div>
+
+      <div id="drop" class="drop">
+        <input id="file-input" type="file" accept=".torrent" />
+        <label for="file-input" class="file-label">choose a .torrent file or drag it here</label>
+      </div>
+
+      <details class="tiny">
+        <summary>advanced trackers (optional)</summary>
+        <p>you can add extra webrtc trackers (comma-separated):</p>
+        <input id="trackers-input" type="text"
+               placeholder="wss://tracker.openwebtorrent.com, wss://tracker.webtorrent.dev" />
+      </details>
+    </section>
+
+    <section id="status" class="card hidden">
+      <h2>status</h2>
+      <div class="stat-grid">
+        <div><span class="k">peers</span><span id="peerCount">0</span></div>
+        <div><span class="k">downloaded</span><span id="downloaded">0 B</span></div>
+        <div><span class="k">download rate</span><span id="downRate">0 B/s</span></div>
+        <div><span class="k">upload rate</span><span id="upRate">0 B/s</span></div>
+      </div>
+      <progress id="progress" value="0" max="1"></progress>
+      <div id="infohash" class="mono tiny"></div>
+    </section>
+
+    <section id="files" class="card hidden">
+      <h2>files</h2>
+      <ul id="fileList" class="file-list"></ul>
+      <p id="save-tip" class="tiny">tip: right-click the download link if your browser auto-plays the file.</p>
+    </section>
+
+    <section id="preview" class="card hidden">
+      <h2>preview</h2>
+      <div id="viewer" class="viewer"></div>
+    </section>
+  </main>
+
+  <footer class="wrap tiny">
+    <p>built with <a href="https://webtorrent.io/" target="_blank" rel="noopener noreferrer">webtorrent</a>. keep it legal.</p>
+  </footer>
+</body>
+</html>
