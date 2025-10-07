@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>nostr + webtorrent (vanilla)</title>
   <link rel="stylesheet" href="/style.css" />
-  <!-- webtorrent for browsers (webrtc only) -->
   <script src="https://cdn.jsdelivr.net/npm/webtorrent@1.9.7/webtorrent.min.js" defer></script>
   <script src="/script.js" defer></script>
 </head>
@@ -16,7 +15,6 @@
   </header>
 
   <main class="wrap">
-    <!-- nostr browser -->
     <section class="card">
       <h2>browse torrents on nostr (nip-35)</h2>
 
@@ -24,9 +22,12 @@
         <summary>relays</summary>
         <div class="tiny" style="margin:6px 0 10px">edit the list, one per line. only public relays are shown by default.</div>
         <textarea id="relayList" class="mono" rows="4"></textarea>
-        <div class="row" style="margin-top:10px">
-          <input id="tagInput" type="text" placeholder="filter by tag (optional, e.g. movie, UHD, anime)" />
-          <input id="limitInput" type="number" min="1" max="200" value="50" style="max-width:140px" />
+        <div class="tiny" style="margin-top:10px">
+          search accepts <strong>keywords</strong> (e.g. <code>house of david</code>) or <strong>tags</strong> (e.g. <code>movie</code> or <code>movie,4k</code> or <code>#movie</code>).
+        </div>
+        <div class="row" style="margin-top:8px">
+          <input id="tagInput" type="text" placeholder="keywords or tags (comma-separated for tags)" />
+          <input id="limitInput" type="number" min="1" max="200" value="100" style="max-width:140px" />
           <button id="searchBtn" type="button">search</button>
         </div>
       </details>
@@ -36,7 +37,6 @@
       <div id="results" class="list"></div>
     </section>
 
-    <!-- webtorrent inputs (same as before) -->
     <section class="card">
       <h2>load a torrent manually</h2>
 
@@ -61,7 +61,6 @@
       </details>
     </section>
 
-    <!-- status + files + preview -->
     <section id="status" class="card hidden">
       <h2>status</h2>
       <div class="stat-grid">
@@ -87,7 +86,7 @@
   </main>
 
   <footer class="wrap tiny">
-    <p>nip-35 browsing uses direct websocket connections to relays; torrenting uses <a href="https://webtorrent.io/" target="_blank" rel="noopener noreferrer">webtorrent (webrtc)</a>.</p>
+    <p>nip-35 browsing uses websocket connections to relays; torrenting uses <a href="https://webtorrent.io/" target="_blank" rel="noopener noreferrer">webtorrent (webrtc)</a>.</p>
   </footer>
 </body>
 </html>
