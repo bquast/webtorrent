@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>vanilla web torrent loader</title>
+  <title>nostr + webtorrent (vanilla)</title>
   <link rel="stylesheet" href="/style.css" />
   <!-- webtorrent for browsers (webrtc only) -->
   <script src="https://cdn.jsdelivr.net/npm/webtorrent@1.9.7/webtorrent.min.js" defer></script>
@@ -11,13 +11,34 @@
 </head>
 <body>
   <header class="wrap">
-    <h1>vanilla web torrent loader</h1>
-    <p class="sub">runs in your browser. no server processing. use only with content you have the right to access.</p>
+    <h1>nostr → webtorrent</h1>
+    <p class="sub">browse NIP-35 torrent events (kind 2003), then stream/download in-browser via WebTorrent. keep it legal.</p>
   </header>
 
   <main class="wrap">
+    <!-- nostr browser -->
     <section class="card">
-      <h2>add a torrent</h2>
+      <h2>browse torrents on nostr (nip-35)</h2>
+
+      <details open>
+        <summary>relays</summary>
+        <div class="tiny" style="margin:6px 0 10px">edit the list, one per line. only public relays are shown by default.</div>
+        <textarea id="relayList" class="mono" rows="4"></textarea>
+        <div class="row" style="margin-top:10px">
+          <input id="tagInput" type="text" placeholder="filter by tag (optional, e.g. movie, UHD, anime)" />
+          <input id="limitInput" type="number" min="1" max="200" value="50" style="max-width:140px" />
+          <button id="searchBtn" type="button">search</button>
+        </div>
+      </details>
+
+      <div id="nostrStatus" class="tiny" style="margin-top:10px;color:#a7b0bb">status: idle</div>
+
+      <div id="results" class="list"></div>
+    </section>
+
+    <!-- webtorrent inputs (same as before) -->
+    <section class="card">
+      <h2>load a torrent manually</h2>
 
       <form id="magnet-form" class="row">
         <input id="magnet-input" type="text" inputmode="url" placeholder="paste magnet link here"
@@ -34,12 +55,13 @@
 
       <details class="tiny">
         <summary>advanced trackers (optional)</summary>
-        <p>you can add extra webrtc trackers (comma-separated):</p>
+        <p>add extra webrtc trackers (comma-separated). note: webtorrent only works with <code>wss://</code> trackers.</p>
         <input id="trackers-input" type="text"
                placeholder="wss://tracker.openwebtorrent.com, wss://tracker.webtorrent.dev" />
       </details>
     </section>
 
+    <!-- status + files + preview -->
     <section id="status" class="card hidden">
       <h2>status</h2>
       <div class="stat-grid">
@@ -65,7 +87,7 @@
   </main>
 
   <footer class="wrap tiny">
-    <p>built with <a href="https://webtorrent.io/" target="_blank" rel="noopener noreferrer">webtorrent</a>. keep it legal.</p>
+    <p>nip-35 browsing uses direct websocket connections to relays; torrenting uses <a href="https://webtorrent.io/" target="_blank" rel="noopener noreferrer">webtorrent (webrtc)</a>.</p>
   </footer>
 </body>
 </html>

@@ -1,18 +1,26 @@
-// note: keep usage legal. this is a generic webtorrent ui that runs in the browser via webrtc.
-// note: comments start lowercase by user preference.
+// note: keep usage legal. this app searches nostr for nip-35 torrent events (kind 2003)
+// and streams/downloads via webtorrent in the browser using webrtc trackers only.
 
+// ===== utilities =====
 const $ = (q) => document.querySelector(q);
+const el = (tag, cls, text) => {
+  const x = document.createElement(tag);
+  if (cls) x.className = cls;
+  if (text != null) x.textContent = text;
+  return x;
+};
 const fmtBytes = (n) => {
   if (!Number.isFinite(n)) return "0 B";
   const u = ["B","KB","MB","GB","TB","PB"];
   const i = Math.max(0, Math.floor(Math.log(n) / Math.log(1024)));
   return `${(n / Math.pow(1024, i)).toFixed(i ? 1 : 0)} ${u[i]}`;
 };
+const uniq = (arr) => [...new Set(arr)];
 
+// ===== webtorrent bits (unchanged core) =====
 let client;
 let currentTorrent;
 
-// default public webrtc trackers; users can add more in the ui if needed
 const defaultAnnounce = [
   "wss://tracker.openwebtorrent.com",
   "wss://tracker.btorrent.xyz",
@@ -22,7 +30,6 @@ const defaultAnnounce = [
 
 function initClient() {
   if (client) return client;
-  // instantiate when webtorrent library is ready on window.WebTorrent
   if (!window.WebTorrent) {
     alert("webtorrent failed to load");
     throw new Error("webtorrent not available");
@@ -31,7 +38,7 @@ function initClient() {
   return client;
 }
 
-// ui elements
+// ui handles (webtorrent)
 const magnetForm = $("#magnet-form");
 const magnetInput = $("#magnet-input");
 const trackersInput = $("#trackers-input");
@@ -52,21 +59,15 @@ const previewCard = $("#preview");
 const viewerEl = $("#viewer");
 const saveTip = $("#save-tip");
 
-// persist magnet in local storage
-const LS_KEY = "vtl:lastMagnet";
+const LS_MAGNET = "vtl:lastMagnet";
+const LS_RELAYS = "vtl:relays";
+const LS_TAG = "vtl:lastTag";
 
-// drag and drop helpers
 ["dragenter","dragover"].forEach(evt =>
-  drop.addEventListener(evt, e => {
-    e.preventDefault(); e.stopPropagation();
-    drop.classList.add("drag");
-  })
+  drop.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); drop.classList.add("drag"); })
 );
 ["dragleave","drop"].forEach(evt =>
-  drop.addEventListener(evt, e => {
-    e.preventDefault(); e.stopPropagation();
-    drop.classList.remove("drag");
-  })
+  drop.addEventListener(evt, e => { e.preventDefault(); e.stopPropagation(); drop.classList.remove("drag"); })
 );
 drop.addEventListener("drop", (e) => {
   const f = e.dataTransfer?.files?.[0];
@@ -75,40 +76,28 @@ drop.addEventListener("drop", (e) => {
     handleTorrentFile(f);
   }
 });
-
-// handle file chooser
 fileInput.addEventListener("change", (e) => {
   const f = e.target.files?.[0];
   if (f) handleTorrentFile(f);
 });
-
-// handle magnet submit
 magnetForm.addEventListener("submit", (e) => {
   e.preventDefault();
   const magnet = (magnetInput.value || "").trim();
   if (!magnet) return;
-  localStorage.setItem(LS_KEY, magnet);
+  localStorage.setItem(LS_MAGNET, magnet);
   loadTorrent(magnet);
 });
-
-// support magnet via url hash (?magnet= or #magnet=) and restore last
-(function bootstrapInputs() {
+(function bootstrapManualInputs() {
   const url = new URL(window.location.href);
   const fromQuery = url.searchParams.get("magnet");
   const fromHash = new URLSearchParams(url.hash.replace(/^#/, "")).get("magnet");
-  const last = localStorage.getItem(LS_KEY);
+  const last = localStorage.getItem(LS_MAGNET);
   const val = fromQuery || fromHash || last || "";
   if (val) magnetInput.value = val;
-  // optional: auto-load if provided via url
-  if (fromQuery || fromHash) {
-    loadTorrent(val);
-  }
+  if (fromQuery || fromHash) loadTorrent(val);
 })();
 
-function handleTorrentFile(file) {
-  // read the file into an ArrayBuffer; webtorrent accepts File/Blob directly too
-  loadTorrent(file);
-}
+function handleTorrentFile(file) { loadTorrent(file); }
 
 function parseExtraTrackers() {
   const txt = (trackersInput.value || "").trim();
@@ -116,7 +105,7 @@ function parseExtraTrackers() {
   return txt.split(",").map(s => s.trim()).filter(Boolean);
 }
 
-function resetUI() {
+function resetWTUI() {
   statusCard.classList.remove("hidden");
   filesCard.classList.add("hidden");
   previewCard.classList.add("hidden");
@@ -132,16 +121,13 @@ function resetUI() {
 
 function loadTorrent(input) {
   initClient();
-  // destroy previous torrent to free memory
   if (currentTorrent) {
     try { currentTorrent.destroy(); } catch {}
     currentTorrent = null;
   }
-  resetUI();
+  resetWTUI();
 
-  const opts = {
-    announce: [...new Set([...defaultAnnounce, ...parseExtraTrackers()])],
-  };
+  const opts = { announce: uniq([...defaultAnnounce, ...parseExtraTrackers()]) };
 
   client.add(input, opts, (torrent) => {
     currentTorrent = torrent;
@@ -150,10 +136,8 @@ function loadTorrent(input) {
 
     renderFiles(torrent);
 
-    // live stats
     const onStats = () => {
-      const peers = torrent.numPeers; // webrtc peers
-      peerCountEl.textContent = String(peers);
+      peerCountEl.textContent = String(torrent.numPeers);
       downloadedEl.textContent = fmtBytes(torrent.downloaded);
       downRateEl.textContent = `${fmtBytes(torrent.downloadSpeed)}/s`;
       upRateEl.textContent = `${fmtBytes(torrent.uploadSpeed)}/s`;
@@ -162,19 +146,11 @@ function loadTorrent(input) {
     torrent.on("download", onStats);
     torrent.on("upload", onStats);
     const t = setInterval(onStats, 500);
-    torrent.on("done", () => {
-      onStats();
-      // gentle flash to indicate done
-      progressEl.classList.add("done");
-      setTimeout(() => progressEl.classList.remove("done"), 1000);
-    });
-    torrent.on("error", (err) => {
-      alert(`torrent error: ${err?.message || err}`);
-    });
+    torrent.on("done", () => { onStats(); progressEl.classList.add("done"); setTimeout(() => progressEl.classList.remove("done"), 1000); });
+    torrent.on("error", (err) => alert(`torrent error: ${err?.message || err}`));
     torrent.on("wire", onStats);
     onStats();
 
-    // auto-preview first reasonable media file
     const firstPlayable = torrent.files.find(f => {
       const n = f.name.toLowerCase();
       return n.endsWith(".mp4") || n.endsWith(".webm") || n.endsWith(".mp3") || n.endsWith(".wav") || n.endsWith(".ogg") || n.endsWith(".m4a") || n.endsWith(".png") || n.endsWith(".jpg") || n.endsWith(".jpeg") || n.endsWith(".gif");
@@ -185,55 +161,29 @@ function loadTorrent(input) {
 
 function renderFiles(torrent) {
   fileListEl.innerHTML = "";
-  torrent.files.forEach((file, idx) => {
-    const li = document.createElement("li");
-    li.className = "file";
+  torrent.files.forEach((file) => {
+    const li = el("li","file");
+    const meta = el("div","meta");
+    const name = el("div", null, file.name);
+    const size = el("span","badge", fmtBytes(file.length));
+    meta.appendChild(name); meta.appendChild(size);
 
-    const meta = document.createElement("div");
-    meta.className = "meta";
-    const name = document.createElement("div");
-    name.textContent = file.name;
-    const size = document.createElement("span");
-    size.className = "badge";
-    size.textContent = fmtBytes(file.length);
-    meta.appendChild(name);
-    meta.appendChild(size);
-
-    const actions = document.createElement("div");
-    actions.className = "actions";
-
-    // download button (blob url)
-    const dlBtn = document.createElement("button");
-    dlBtn.textContent = "download";
+    const actions = el("div","actions");
+    const dlBtn = el("button", null, "download");
     dlBtn.addEventListener("click", async () => {
-      dlBtn.disabled = true;
-      dlBtn.textContent = "preparing…";
+      dlBtn.disabled = true; dlBtn.textContent = "preparing…";
       try {
         const blob = await getFileBlob(file);
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = url;
-        a.download = file.name;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+        a.href = url; a.download = file.name; document.body.appendChild(a); a.click(); a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 10_000);
-      } catch (e) {
-        alert(`download failed: ${e?.message || e}`);
-      } finally {
-        dlBtn.disabled = false;
-        dlBtn.textContent = "download";
-      }
+      } catch (e) { alert(`download failed: ${e?.message || e}`); }
+      dlBtn.disabled = false; dlBtn.textContent = "download";
     });
-
-    // preview button
-    const pvBtn = document.createElement("button");
-    pvBtn.textContent = "preview";
+    const pvBtn = el("button", null, "preview");
     pvBtn.addEventListener("click", () => previewFile(file));
-
-    // direct link (stream) — some browsers stream instead of downloading
-    const link = document.createElement("a");
-    link.textContent = "open";
+    const link = el("a", null, "open");
     link.href = "#";
     link.addEventListener("click", async (e) => {
       e.preventDefault();
@@ -242,119 +192,262 @@ function renderFiles(torrent) {
         const url = URL.createObjectURL(blob);
         window.open(url, "_blank", "noopener,noreferrer");
         setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      } catch (e2) {
-        alert(`open failed: ${e2?.message || e2}`);
-      }
+      } catch (e2) { alert(`open failed: ${e2?.message || e2}`); }
     });
 
-    actions.appendChild(dlBtn);
-    actions.appendChild(pvBtn);
-    actions.appendChild(link);
-
-    li.appendChild(meta);
-    li.appendChild(actions);
+    actions.appendChild(dlBtn); actions.appendChild(pvBtn); actions.appendChild(link);
+    li.appendChild(meta); li.appendChild(actions);
     fileListEl.appendChild(li);
   });
-
   filesCard.classList.remove("hidden");
   saveTip.style.display = "block";
 }
 
 function getFileBlob(file) {
-  // webtorrent file api supports arrayBuffer/stream/blob callback; wrap in promise
   return new Promise((resolve, reject) => {
-    file.getBlob((err, blob) => {
-      if (err) reject(err);
-      else resolve(blob);
-    });
+    file.getBlob((err, blob) => err ? reject(err) : resolve(blob));
   });
 }
 
 async function previewFile(file) {
   previewCard.classList.remove("hidden");
   viewerEl.innerHTML = "";
-
   const lower = file.name.toLowerCase();
-  // stream to media element where sensible; fallback to blob
   if (/\.(mp4|webm)$/.test(lower)) {
-    const video = document.createElement("video");
-    video.controls = true;
-    video.playsInline = true;
-    video.autoplay = false;
+    const video = el("video"); video.controls = true; video.playsInline = true;
     viewerEl.appendChild(video);
-    // appendTo efficiently streams via MediaSource
-    file.appendTo(video, (err) => {
-      if (err) showBlobPreview(file, "video");
-    });
+    file.appendTo(video, (err) => { if (err) showBlobPreview(file, "video"); });
     return;
   }
   if (/\.(mp3|m4a|wav|ogg)$/.test(lower)) {
-    const audio = document.createElement("audio");
-    audio.controls = true;
-    viewerEl.appendChild(audio);
-    file.appendTo(audio, (err) => {
-      if (err) showBlobPreview(file, "audio");
-    });
+    const audio = el("audio"); audio.controls = true; viewerEl.appendChild(audio);
+    file.appendTo(audio, (err) => { if (err) showBlobPreview(file, "audio"); });
     return;
   }
-  if (/\.(png|jpg|jpeg|gif|webp|bmp)$/.test(lower)) {
-    // for images, blob is simple and memory-acceptable compared to appendTo
-    showBlobPreview(file, "img");
-    return;
-  }
-
-  // fallback: offer download
-  const p = document.createElement("p");
-  p.className = "tiny";
-  p.textContent = "no inline preview available. use the download button instead.";
-  viewerEl.appendChild(p);
+  if (/\.(png|jpg|jpeg|gif|webp|bmp)$/.test(lower)) return showBlobPreview(file, "img");
+  const p = el("p","tiny","no inline preview available. use the download button instead."); viewerEl.appendChild(p);
 }
-
 async function showBlobPreview(file, kind) {
   try {
     const blob = await getFileBlob(file);
     const url = URL.createObjectURL(blob);
-    if (kind === "video") {
-      const el = document.createElement("video");
-      el.controls = true;
-      el.playsInline = true;
-      el.src = url;
-      viewerEl.appendChild(el);
-    } else if (kind === "audio") {
-      const el = document.createElement("audio");
-      el.controls = true;
-      el.src = url;
-      viewerEl.appendChild(el);
-    } else if (kind === "img") {
-      const el = document.createElement("img");
-      el.alt = file.name;
-      el.src = url;
-      viewerEl.appendChild(el);
-    }
-    // revoke later to keep it viewable for a while
+    if (kind === "video") { const v = el("video"); v.controls = true; v.playsInline = true; v.src = url; viewerEl.appendChild(v); }
+    else if (kind === "audio") { const a = el("audio"); a.controls = true; a.src = url; viewerEl.appendChild(a); }
+    else { const i = el("img"); i.alt = file.name; i.src = url; viewerEl.appendChild(i); }
     setTimeout(() => URL.revokeObjectURL(url), 5 * 60_000);
   } catch (e) {
-    const p = document.createElement("p");
-    p.className = "tiny";
-    p.textContent = `preview failed: ${e?.message || e}`;
-    viewerEl.appendChild(p);
+    const p = el("p","tiny",`preview failed: ${e?.message || e}`); viewerEl.appendChild(p);
   }
 }
 
-// accessibility and affordances
 window.addEventListener("keydown", (e) => {
-  // ctrl/cmd+v to paste magnet quickly into the field if not focused
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
-    if (document.activeElement !== magnetInput) {
-      magnetInput.focus();
-    }
+    if (document.activeElement !== magnetInput) magnetInput.focus();
+  }
+});
+window.addEventListener("beforeunload", (e) => {
+  if (currentTorrent && currentTorrent.downloaded < currentTorrent.length) {
+    e.preventDefault(); e.returnValue = "";
   }
 });
 
-// warn on unload if an active torrent exists
-window.addEventListener("beforeunload", (e) => {
-  if (currentTorrent && currentTorrent.downloaded < currentTorrent.length) {
-    e.preventDefault();
-    e.returnValue = "";
-  }
+// ===== nostr (nip-35) browser =====
+// minimal, dependency-free nostr client using raw websockets.
+// we fetch kind:2003 events; optional tag filter "#t": [tag]. see the nip text in your prompt.
+
+const relayList = $("#relayList");
+const tagInput = $("#tagInput");
+const limitInput = $("#limitInput");
+const searchBtn = $("#searchBtn");
+const nostrStatus = $("#nostrStatus");
+const results = $("#results");
+
+const DEFAULT_RELAYS = [
+  "wss://relay.damus.io",
+  "wss://offchain.pub",
+  "wss://nos.lol",
+  "wss://relay.nostr.band",
+  "wss://eden.nostr.land"
+];
+
+(function bootstrapRelays() {
+  const saved = localStorage.getItem(LS_RELAYS);
+  const relays = saved ? JSON.parse(saved) : DEFAULT_RELAYS;
+  relayList.value = relays.join("\n");
+  const savedTag = localStorage.getItem(LS_TAG) || "";
+  tagInput.value = savedTag;
+})();
+
+searchBtn.addEventListener("click", () => {
+  const relays = relayList.value.split("\n").map(s => s.trim()).filter(Boolean);
+  localStorage.setItem(LS_RELAYS, JSON.stringify(relays));
+  const tag = tagInput.value.trim();
+  localStorage.setItem(LS_TAG, tag);
+  const limit = Math.max(1, Math.min(200, parseInt(limitInput.value || "50", 10)));
+  searchNostr(relays, tag, limit);
 });
+
+// maintain active sockets for one search
+let activeSockets = [];
+let subId = null;
+let seenEventIds = new Set();
+
+function closeActiveSockets() {
+  activeSockets.forEach(ws => { try { ws.close(); } catch {} });
+  activeSockets = [];
+  subId = null;
+}
+
+function updateStatus(txt) { nostrStatus.textContent = `status: ${txt}`; }
+
+function searchNostr(relayUrls, tag, limit) {
+  closeActiveSockets();
+  results.innerHTML = "";
+  seenEventIds.clear();
+
+  if (relayUrls.length === 0) {
+    updateStatus("no relays configured");
+    return;
+  }
+
+  subId = `sub_${Math.random().toString(36).slice(2, 10)}`;
+
+  // nostr filter
+  const filter = { kinds: [2003], limit };
+  if (tag) filter["#t"] = [tag];
+
+  updateStatus(`connecting to ${relayUrls.length} relays…`);
+
+  let openCount = 0;
+  let eoseCount = 0;
+
+  relayUrls.forEach((url) => {
+    try {
+      const ws = new WebSocket(url);
+      ws.onopen = () => {
+        openCount++;
+        updateStatus(`connected ${openCount}/${relayUrls.length}; querying…`);
+        ws.send(JSON.stringify(["REQ", subId, filter]));
+      };
+      ws.onmessage = (ev) => handleRelayMessage(ws, url, ev.data);
+      ws.onerror = () => updateStatus(`error on ${url}`);
+      ws.onclose = () => updateStatus(`closed ${url}`);
+      activeSockets.push(ws);
+    } catch (e) {
+      // ignore individual failures
+    }
+  });
+
+  function handleRelayMessage(ws, url, raw) {
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return; }
+    const [type, ...rest] = msg;
+
+    if (type === "EVENT") {
+      const [sid, ev] = rest;
+      if (sid !== subId) return;
+      if (seenEventIds.has(ev.id)) return; // de-dupe across relays
+      seenEventIds.add(ev.id);
+      const parsed = parseTorrentEvent(ev);
+      if (parsed) results.appendChild(renderResultItem(parsed, ev, url));
+    } else if (type === "EOSE") {
+      const [sid] = rest;
+      if (sid !== subId) return;
+      eoseCount++;
+      updateStatus(`done (EOSE ${eoseCount}/${relayUrls.length})`);
+      // after all sent, we can close sockets to stop further streaming
+      if (eoseCount >= relayUrls.length) {
+        setTimeout(closeActiveSockets, 500);
+      }
+    } else if (type === "NOTICE") {
+      // optionally show relay notices in console
+      // console.log("relay notice", url, rest);
+    }
+  }
+}
+
+// parse nip-35 event (kind 2003)
+function parseTorrentEvent(ev) {
+  if (!ev || ev.kind !== 2003 || !Array.isArray(ev.tags)) return null;
+
+  const getFirstTag = (name) => {
+    const t = ev.tags.find((x) => x[0] === name);
+    return t ? t.slice(1) : null;
+  };
+  const getAllTags = (name) => ev.tags.filter((x) => x[0] === name).map(x => x.slice(1));
+
+  const title = (getFirstTag("title") || [])[0] || (ev.content || "").slice(0, 120) || "(untitled)";
+  const xt = (getFirstTag("x") || [])[0]; // bittorrent info hash (v1)
+  if (!xt) return null;
+
+  // trackers from event; we will only use wss:// for webtorrent
+  const trackers = getAllTags("tracker").map(a => a[0]).filter(Boolean);
+  const webrtcTrackers = trackers.filter(tr => tr.startsWith("wss://"));
+
+  const files = getAllTags("file").map(([name, size]) => ({ name, size: parseInt(size || "0", 10) || 0 }));
+  const totalSize = files.reduce((s,f)=>s+f.size,0);
+
+  const tTags = ev.tags.filter(t => t[0] === "t").map(t => t[1]).filter(Boolean);
+
+  // optional prefixed reference tags ["i","imdb:tt123", ...]
+  const iRefs = ev.tags.filter(t => t[0] === "i").map(t => t[1]).filter(Boolean);
+
+  // construct magnet (webtorrent ignores non-wrtc trackers, but we include event wss trackers)
+  let magnet = `magnet:?xt=urn:btih:${xt}`;
+  webrtcTrackers.forEach(tr => { magnet += `&tr=${encodeURIComponent(tr)}`; });
+
+  return { title, infoHash: xt, magnet, trackers: webrtcTrackers, files, totalSize, tTags, iRefs, author: ev.pubkey, created_at: ev.created_at };
+}
+
+function renderResultItem(t, ev, sourceRelay) {
+  const item = el("div","item");
+
+  const head = el("div","item-head");
+  const left = el("div");
+  left.appendChild(el("div","item-title", t.title));
+  const sub = el("div","item-sub",
+    `size: ${t.totalSize ? fmtBytes(t.totalSize) : "unknown"} · infohash: ${t.infoHash.slice(0,8)}… · relay: ${sourceRelay}`
+  );
+  left.appendChild(sub);
+  head.appendChild(left);
+
+  const actions = el("div","item-actions");
+  const copyMag = el("button", null, "copy magnet");
+  copyMag.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(t.magnet);
+      copyMag.textContent = "copied!";
+      setTimeout(()=>copyMag.textContent="copy magnet", 1200);
+    } catch {}
+  });
+
+  const loadBtn = el("button", null, "load");
+  loadBtn.addEventListener("click", () => {
+    // merge event wss trackers into the advanced tracker input (deduped)
+    const merged = uniq([...(trackersInput.value ? trackersInput.value.split(",").map(s=>s.trim()) : []), ...t.trackers]);
+    trackersInput.value = merged.join(", ");
+    magnetInput.value = t.magnet; // visible to user
+    localStorage.setItem(LS_MAGNET, t.magnet);
+    loadTorrent(t.magnet);
+    window.scrollTo({ top: statusCard.offsetTop - 10, behavior: "smooth" });
+  });
+
+  actions.appendChild(loadBtn);
+  actions.appendChild(copyMag);
+  head.appendChild(actions);
+  item.appendChild(head);
+
+  if (t.tTags.length || t.iRefs.length) {
+    const tags = el("div","item-tags");
+    t.tTags.forEach(x => tags.appendChild(el("span","tag", `t:${x}`)));
+    t.iRefs.forEach(x => tags.appendChild(el("span","tag", `i:${x}`)));
+    item.appendChild(tags);
+  }
+
+  if (t.files.length) {
+    const filesWrap = el("div","tiny", `${t.files.length} file(s): ` + t.files.slice(0,5).map(f => `${f.name} (${fmtBytes(f.size)})`).join(", ") + (t.files.length>5?"…":""));
+    item.appendChild(filesWrap);
+  }
+
+  return item;
+}
